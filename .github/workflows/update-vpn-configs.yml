@@ -12,16 +12,13 @@ jobs:
         with:
           token: ${{ secrets.PAT_TOKEN }}
           fetch-depth: 0
-
       - name: Switch to auto-source branch, create if not exists
         run: |
           git checkout auto-source || git checkout -b auto-source
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-
       - name: Cache pip dependencies
         uses: actions/cache@v5
         with:
@@ -29,30 +26,23 @@ jobs:
           key: ${{ runner.os }}-pip-${{ hashFiles('source/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-
-
       - name: Create virtual environment
         run: python -m venv venv --copies
-
       - name: Upgrade pip
         run: ./venv/bin/python -m pip install --upgrade pip
-
       - name: Install requirements
         run: ./venv/bin/python -m pip install -r source/requirements.txt
-
       - name: Run main script
         run: ./venv/bin/python source/main.py
-
       - name: Configure Git user
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git remote set-url origin https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }}
-
       - name: Check for changes
         run: |
           git status
           git diff --stat
-
       - name: Commit & Push auto-source
         run: |
           git add .
@@ -62,3 +52,18 @@ jobs:
           else
             echo "✅ No file changes, skip commit and push."
           fi
+
+  # 新增：执行完毕自动清理旧记录，只保留1条
+  clean-old-runs:
+    needs: update-configs
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Remove old runs, keep only 1
+        uses: mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          repository: ${{ github.repository }}
+          workflow_name: "Update VPN Configs"
+          keep_minimum_runs: 1
