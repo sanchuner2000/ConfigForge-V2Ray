@@ -1,0 +1,22 @@
+name: Clean Update VPN Configs Runs
+on:
+  workflow_dispatch:
+  # 可按需定时，这里示例每天北京时间7点执行（UTC 23点）
+  schedule:
+    - cron: "0 23 * * *"
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old workflow runs, keep only latest 1
+        uses: mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ secrets.PAT_TOKEN }}
+          repository: ${{ github.repository }}
+          workflow_name: "Update VPN Configs"
+          keep_minimum_runs: 1
