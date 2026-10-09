@@ -1,22 +1,36 @@
 name: Clean Update VPN Configs Runs
 on:
-  workflow_dispatch:
-  # 可按需定时，这里示例每天北京时间7点执行（UTC 23点）
   schedule:
-    - cron: "0 23 * * *"
-
-permissions:
-  actions: write
-  contents: read
+    # 北京时间早6点 = UTC 22:00
+    - cron: "0 22 * * *"
+  workflow_dispatch:
 
 jobs:
   clean:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+      REPO: ${{ github.repository }}
+      WORKFLOW_NAME: "Update VPN Configs"
     steps:
-      - name: Delete old workflow runs, keep only latest 1
-        uses: mattraks/delete-workflow-runs@v2
-        with:
-          token: ${{ secrets.PAT_TOKEN }}
-          repository: ${{ github.repository }}
-          workflow_name: "Update VPN Configs"
-          keep_minimum_runs: 1
+      - name: Delete all finished runs of Update VPN Configs
+        run: |
+          set -e
+          echo "=== 获取所有已完成运行记录 ==="
+          RUN_IDS=$(gh api -H "X-GitHub-Api-Version:2022-11-28" \
+            "/repos/$REPO/actions/workflows/$WORKFLOW_NAME/runs" \
+            --paginate \
+            --jq '.workflow_runs[] | select(.conclusion != null) | .id')
+          if [ -z "$RUN_IDS" ];then
+            echo "没有找到可删除的历史run"
+            exit 0
+          fi
+          echo "$RUN_IDS"
+          while IFS= read -r rid; do
+            if [ -n "$rid" ];then
+              echo "正在删除 run id: $rid"
+              gh api --method DELETE -H "X-GitHub-Api-Version:2022-11-28" "/repos/$REPO/actions/runs/$rid" || true
+              sleep 0.25
+            fi
+          done <<< "$RUN_IDS"
+          echo "✅ 全部清理完成"
