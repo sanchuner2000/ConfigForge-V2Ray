@@ -1,36 +1,57 @@
 name: Clean Update VPN Configs Runs
 on:
-  schedule:
-    # 北京时间早6点 = UTC 22:00
-    - cron: "0 22 * * *"
   workflow_dispatch:
+  schedule:
+    - cron: '0 22 * * *' # UTC22点，北京时间早上6点自动清理
 
 jobs:
   clean:
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.PAT_TOKEN }}
-      REPO: ${{ github.repository }}
-      WORKFLOW_NAME: "Update VPN Configs"
+      TOKEN: ${{ secrets.PAT_TOKEN }}
+      REPO: sanchuner2000/ConfigForge-V2Ray
     steps:
-      - name: Delete all finished runs of Update VPN Configs
+      - name: Delete finished runs, keep latest one for each workflow
         run: |
-          set -e
-          echo "=== 获取所有已完成运行记录 ==="
-          RUN_IDS=$(gh api -H "X-GitHub-Api-Version:2022-11-28" \
-            "/repos/$REPO/actions/workflows/$WORKFLOW_NAME/runs" \
-            --paginate \
-            --jq '.workflow_runs[] | select(.conclusion != null) | .id')
-          if [ -z "$RUN_IDS" ];then
-            echo "没有找到可删除的历史run"
-            exit 0
-          fi
-          echo "$RUN_IDS"
-          while IFS= read -r rid; do
-            if [ -n "$rid" ];then
-              echo "正在删除 run id: $rid"
-              gh api --method DELETE -H "X-GitHub-Api-Version:2022-11-28" "/repos/$REPO/actions/runs/$rid" || true
-              sleep 0.25
+          set +e
+          clean_workflow_by_id() {
+            local WF_ID="$1"
+            echo "===== 清理 Workflow ID: $WF_ID ====="
+            local ALL_RUNS=""
+            local PAGE=1
+            while true; do
+              RESP=$(curl -s -w "\nHTTP_STATUS=%{http_code}" -H "Authorization: token $TOKEN" "https://api.github.com/repos/${REPO}/actions/workflows/${WF_ID}/runs?per_page=100&page=${PAGE}")
+              HTTP_CODE=$(echo "$RESP" | tail -n1 | sed 's/HTTP_STATUS=//')
+              BODY=$(echo "$RESP" | head -n -1)
+              if [ "$HTTP_CODE" -ne 200 ];then
+                echo "❌ API请求失败，跳过该工作流"
+                return
+              fi
+              PAGE_RUNS=$(echo "$BODY" | jq -r '.workflow_runs[] | select(.status=="completed") | .id')
+              if [ -z "$PAGE_RUNS" ]; then
+                break
+              fi
+              ALL_RUNS+=$'\n'"$PAGE_RUNS"
+              PAGE=$((PAGE+1))
+            done
+            arr=($(echo "$ALL_RUNS" | sed '/^$/d'))
+            count=${#arr[@]}
+            echo "✅ 找到已完成记录总数: $count"
+            if (( count <= 1 )); then
+              echo "记录数量≤1，无需删除"
+              return
             fi
-          done <<< "$RUN_IDS"
-          echo "✅ 全部清理完成"
+            for ((i=1; i<count; i++)); do
+              rid=${arr[$i]}
+              echo "删除 Run ID: $rid"
+              curl -X DELETE -s -H "Authorization: token $TOKEN" "https://api.github.com/repos/${REPO}/actions/runs/$rid" || echo "⚠ 删除失败: $rid"
+            done
+            echo "===== ID $WF_ID 清理完成 ====="
+          }
+          # 主工作流 Update VPN Configs ID
+          clean_workflow_by_id 358488966
+          # 自动获取当前Clean自身工作流ID，清理自己历史记录
+          RESP_SELF=$(curl -s -H "Authorization: token $TOKEN" "https://api.github.com/repos/${REPO}/actions/workflows")
+          SELF_ID=$(echo "$RESP_SELF" | jq -r '.workflows[] | select(.name=="Clean Update VPN Configs Runs") | .id')
+          echo "当前清理脚本自身Workflow ID: $SELF_ID"
+          clean_workflow_by_id $SELF_ID
